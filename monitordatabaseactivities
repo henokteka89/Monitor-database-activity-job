@@ -1,0 +1,51 @@
+CREATE TABLE DatabaseActivityLog (
+    LogID INT IDENTITY(1,1) PRIMARY KEY,
+    DatabaseName NVARCHAR(128),
+    EventTime DATETIME,
+    HostName NVARCHAR(128),
+    LoginName NVARCHAR(128),
+    CommandText NVARCHAR(MAX)
+);
+
+
+
+CREATE PROCEDURE usp_LogDatabaseActivity
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @databases TABLE (DatabaseID INT, DatabaseName NVARCHAR(128));
+    
+    -- List of databases to monitor
+    INSERT INTO @databases (DatabaseID, DatabaseName)
+    SELECT database_id, name
+    FROM sys.databases
+    WHERE name IN ('Database1', 'Database2', 'Database3');  -- Replace with your database names
+
+    -- Insert activity details into the log table
+    INSERT INTO DatabaseActivityLog (DatabaseName, EventTime, HostName, LoginName, CommandText)
+    SELECT 
+        DB_NAME(ses.database_id) AS DatabaseName,
+        GETDATE() AS EventTime,
+        ses.host_name AS HostName,
+        ses.login_name AS LoginName,
+        txt.text AS CommandText
+    FROM 
+        sys.dm_exec_sessions AS ses
+        JOIN sys.dm_exec_requests AS req ON ses.session_id = req.session_id
+        CROSS APPLY sys.dm_exec_sql_text(req.sql_handle) AS txt
+    WHERE 
+        ses.database_id IN (SELECT DatabaseID FROM @databases)
+        AND ses.program_name NOT LIKE 'SQLAgent%';
+
+    -- Remove older log entries to maintain table size
+    DELETE FROM DatabaseActivityLog
+    WHERE EventTime < DATEADD(DAY, -30, GETDATE());  -- Retain logs for the last 30 days
+END;
+
+
+---JOB
+--EXEC usp_LogDatabaseActivity;
+
+--Check the table 
+--SELECT * FROM DatabaseActivityLog ORDER BY EventTime DESC;
